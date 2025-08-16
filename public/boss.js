@@ -1,10 +1,42 @@
 (() => {
  const DIFFS = {
-    easy:   { base: 90,  phaseBoost: 18, dodgeCooldown: 600, graceMs: 1800, stun1: 0.10, stun2: 0.20, stun3: 0.35, cloneMax: 1, fakeProb: 0.20 },
-    normal: { base: 140, phaseBoost: 30, dodgeCooldown: 280, graceMs: 900,  stun1: 0.25, stun2: 0.40, stun3: 0.50, cloneMax: 3, fakeProb: 0.35 },
-    hard:   { base: 170, phaseBoost: 36, dodgeCooldown: 180, graceMs: 600,  stun1: 0.35, stun2: 0.55, stun3: 0.70, cloneMax: 5, fakeProb: 0.50 }
-  };
-  
+  // 쉬움: 회피 반경 ↓, 그레이스 ↑, 쿨다운 ↑, 슬라이드 이동
+  easy: {
+    base: 60, phaseBoost: 10,
+    dodgeCooldown: 700, graceMs: 1800,
+    stun1: 0.05, stun2: 0.12, stun3: 0.20,
+    cloneMax: 1, fakeProb: 0.15,
+    rampStart: 0.15, rampSec: 12000,  // 천천히 어려워짐
+    slideMs: 200,                     // 순간이동 대신 부드럽게 이동
+    maxDodgesInWindow: 3, dodgeWindowMs: 2000, // 2초에 최대 3회 회피
+    safeHoverMs: 500                  // 마우스가 거의 안 움직이면 회피 금지
+  },
+
+  // 보통: 확실히 쉬워짐
+  normal: {
+    base: 90, phaseBoost: 18,
+    dodgeCooldown: 420, graceMs: 1200,
+    stun1: 0.18, stun2: 0.30, stun3: 0.48,
+    cloneMax: 2, fakeProb: 0.25,
+    rampStart: 0.25, rampSec: 10000,
+    slideMs: 140,
+    maxDodgesInWindow: 4, dodgeWindowMs: 2000,
+    safeHoverMs: 450
+  },
+
+  // 어려움: 기존 난이도 느낌 유지
+  hard: {
+    base: 130, phaseBoost: 30,
+    dodgeCooldown: 180, graceMs: 700,
+    stun1: 0.30, stun2: 0.50, stun3: 0.70,
+    cloneMax: 5, fakeProb: 0.50,
+    rampStart: 0.40, rampSec: 8000,
+    slideMs: 0,             // 하드는 텔레포트 유지
+    maxDodgesInWindow: 999, dodgeWindowMs: 1000,
+    safeHoverMs: 0
+  }
+};
+
     const $  = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
@@ -32,7 +64,13 @@
     stunUntil: 0,
     cfg: DIFFS.normal, 
     graceUntil: 0,
-    lastDodge: 0
+    lastDodge: 0,
+    cfg: DIFFS.normal,
+graceUntil: 0,
+lastDodgeAt: 0,
+lastMoves: [],
+lastMouse: { x: 0, y: 0, t: 0 },
+stillSince: 0
   };
 
   // Elements
@@ -61,50 +99,43 @@ if (resetBtn) {
   arena?.addEventListener('mousemove', onMove);
 
   function start(){
-    if (state.started) return;
-    const sel = document.getElementById('difficulty');
-    const level = (sel?.value || 'normal');
-    state.cfg = DIFFS[level] || DIFFS.normal;
+  if (state.started) return;
 
-    state.started = true; state.finished = false; state.hp = MaxHP;
-    state.startAt = Date.now(); 
-    state.graceUntil = state.startAt + state.cfg.graceMs;
-    updatePhase();
-    arena.classList.remove('shake');
-    if (hpEl) hpEl.style.width = '100%';
-    // Timer
-    state.timerId = setInterval(()=>{
-      const ms = Date.now() - state.startAt;
-      setTimer(ms);
-    }, 30);
-  }
+  const sel = document.getElementById('difficulty');
+  const level = (sel?.value || 'normal');
+  state.cfg = DIFFS[level] || DIFFS.normal;
+
+  state.started = true; state.finished = false;
+  state.hp = MaxHP; state.phase = 1;
+  state.startAt = Date.now();
+  state.graceUntil = state.startAt + state.cfg.graceMs;
+  state.lastDodgeAt = 0; state.lastMoves = [];
+  state.lastMouse = { x: 0, y: 0, t: Date.now() };
+  state.stillSince = 0;
+
+  // 슬라이드 이동(쉬움/보통)
+  const ms = state.cfg.slideMs || 0;
+  agreeBtn.style.transition = ms ? `left ${ms}ms ease, top ${ms}ms ease` : '';
+
+  if (hpEl) hpEl.style.width = '100%';
+  updatePhase();
+  state.timerId = setInterval(()=> setTimer(Date.now() - state.startAt), 30);
+}
+
 
   function doReset(){
-  console.log('[reset] doReset');
-  state.started = false;
-  state.finished = false;
-  state.hp = MaxHP;
-  state.phase = 1;
-  state.stunUntil = 0;
-  state.lastDodgeAt = 0;
-  state.graceUntil = 0;
-
-  // 타이머 정지 및 초기화
+  state.started = false; state.finished = false;
+  state.hp = MaxHP; state.phase = 1;
+  state.stunUntil = 0; state.lastDodgeAt = 0;
+  state.lastMoves = []; state.stillSince = 0;
   if (state.timerId) { clearInterval(state.timerId); state.timerId = null; }
   setTimer(0);
-
-  // HP바 원복
   if (hpEl) hpEl.style.width = '100%';
-
-  // 오버레이/클론 정리
   if (overlay) { overlay.classList.add('hidden'); overlay.innerHTML = ''; }
-  $$('.clone').forEach(n => n.remove());
-
-  // 버튼 중앙 복귀 (레이아웃 갱신 후)
-  requestAnimationFrame(() => {
-    placeButton(0.5, 0.5);
-  });
+  $$('.clone').forEach(n=>n.remove());
+  requestAnimationFrame(()=> placeButton(0.5, 0.5));
 }
+
 
   function setTimer(ms){ if (!timerEl) return; const s = (ms/1000).toFixed(3).padStart(7, '0'); timerEl.textContent = s; }
 
@@ -168,8 +199,7 @@ if (resetBtn) {
 
   // === 패턴 시스템 ===
   function patternTick(){
-    const p = state.phase;
-  const cfg = state.cfg;
+  const p = state.phase, cfg = state.cfg;
   if (p === 1) {
     if (Math.random() < cfg.stun1) doStun(500);
   } else if (p === 2) {
@@ -180,7 +210,8 @@ if (resetBtn) {
     if (Math.random() < cfg.stun3) doStun(900);
     if (Math.random() < cfg.fakeProb) fakePopup();
   }
-  }
+}
+
 
   function doStun(ms){ state.stunUntil = Date.now() + ms; }
 
@@ -225,37 +256,57 @@ if (resetBtn) {
   function onMove(e){
   if (!state.started || state.finished) return;
   if (!arena || !agreeBtn) return;
+
   state.arenaRect = arena.getBoundingClientRect();
-
   const now = Date.now();
+  const cfg = state.cfg;
 
-  // 1) 그레이스 기간엔 회피 금지
+  // 1) 그레이스 기간: 회피 안 함
   if (now < state.graceUntil) return;
 
-  // 2) 쿨다운: 직전 회피 이후 일정 시간은 회피 금지
-  if (now - state.lastDodgeAt < state.cfg.dodgeCooldown) return;
+  // 2) 회피 쿨다운
+  if (now - state.lastDodgeAt < cfg.dodgeCooldown) return;
+
+  // 3) 마우스 속도 기반: 거의 정지 상태면 보호
+  const mouse = { x: e.clientX, y: e.clientY };
+  const dt = now - state.lastMouse.t;
+  const speed = dt > 0 ? Math.hypot(mouse.x - state.lastMouse.x, mouse.y - state.lastMouse.y) / dt : 0; // px/ms
+  state.lastMouse = { x: mouse.x, y: mouse.y, t: now };
+  if (cfg.safeHoverMs) {
+    if (speed < 0.2) {
+      if (!state.stillSince) state.stillSince = now;
+      if (now - state.stillSince >= cfg.safeHoverMs) return;
+    } else {
+      state.stillSince = 0;
+    }
+  }
 
   // 거리 계산
   const btnRect = agreeBtn.getBoundingClientRect();
-  const mouse = { x: e.clientX, y: e.clientY };
   const btnCenter = { x: btnRect.left + btnRect.width/2, y: btnRect.top + btnRect.height/2 };
   const dist = Math.hypot(mouse.x - btnCenter.x, mouse.y - btnCenter.y);
 
-  // 3) 램핑: 시작 후 8초 동안은 threshold가 점진적으로 증가
+  // 4) 램핑: 일정 시간 동안 회피 반경이 점진적으로 커짐
   const elapsed = now - state.startAt;
-  const rampSec = 8000;
-  const ramp = Math.max(0.4, Math.min(1, elapsed / rampSec)); // 0.4~1 사이
-  const threshold = (state.cfg.base + state.phase * state.cfg.phaseBoost) * ramp;
+  const ramp = Math.max(cfg.rampStart, Math.min(1, elapsed / cfg.rampSec));
+  const threshold = (cfg.base + state.phase * cfg.phaseBoost) * ramp;
 
   if (now < state.stunUntil) return; // 스턴 중엔 회피 X
 
   if (dist < threshold) {
+    // 5) 회피 빈도 제한: 최근 N초 내 회피 횟수 제한
+    state.lastMoves = state.lastMoves.filter(t => now - t < cfg.dodgeWindowMs);
+    if (state.lastMoves.length >= (cfg.maxDodgesInWindow || 999)) return;
+
     const p = randPos();
     agreeBtn.style.left = p.x + 'px';
     agreeBtn.style.top  = p.y + 'px';
-    state.lastDodgeAt = now; // 쿨다운 시작
+
+    state.lastDodgeAt = now;
+    state.lastMoves.push(now);
   }
 }
+
 
 
   function randPos(){
