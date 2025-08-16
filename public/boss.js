@@ -36,7 +36,18 @@
 
   // Controls
   $('#startBtn')?.addEventListener('click', start);
-  $('#resetBtn')?.addEventListener('click', reset);
+  //$('#resetBtn')?.addEventListener('click', reset); 
+  const resetBtn = document.getElementById('resetBtn');
+if (resetBtn) {
+  resetBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[reset] clicked');
+    doReset(); // 👈 새 함수
+  });
+} else {
+  console.warn('[reset] #resetBtn not found');
+}
   agreeBtn?.addEventListener('click', onHit);
   arena?.addEventListener('mousemove', onMove);
 
@@ -53,15 +64,30 @@
     }, 30);
   }
 
-  function reset(){
-    state.started = false; state.finished = false; state.hp = MaxHP; state.phase = 1; state.stunUntil = 0;
-    if (hpEl) hpEl.style.width = '100%';
-    setTimer(0);
-    overlay?.classList.add('hidden');
-    $$('.clone').forEach(n=>n.remove());
-    // 버튼 중앙 복귀
+  function doReset(){
+  console.log('[reset] doReset');
+  state.started = false;
+  state.finished = false;
+  state.hp = MaxHP;
+  state.phase = 1;
+  state.stunUntil = 0;
+
+  // 타이머 정지 및 초기화
+  if (state.timerId) { clearInterval(state.timerId); state.timerId = null; }
+  setTimer(0);
+
+  // HP바 원복
+  if (hpEl) hpEl.style.width = '100%';
+
+  // 오버레이/클론 정리
+  if (overlay) { overlay.classList.add('hidden'); overlay.innerHTML = ''; }
+  $$('.clone').forEach(n => n.remove());
+
+  // 버튼 중앙 복귀 (레이아웃 갱신 후)
+  requestAnimationFrame(() => {
     placeButton(0.5, 0.5);
-  }
+  });
+}
 
   function setTimer(ms){ if (!timerEl) return; const s = (ms/1000).toFixed(3).padStart(7, '0'); timerEl.textContent = s; }
 
