@@ -19,7 +19,7 @@
     stun1: 0.18, stun2: 0.30, stun3: 0.48,
     cloneMax: 2, fakeProb: 0.25,
     rampStart: 0.25, rampSec: 10000,
-    slideMs: 140,
+    slideMs: 160,
     maxDodgesInWindow: 4, dodgeWindowMs: 2000,
     safeHoverMs: 450
   },
